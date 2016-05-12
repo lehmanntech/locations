@@ -6,10 +6,8 @@ ENV base /usr/src/app
 RUN mkdir -p $base
 WORKDIR $base
 
-COPY package.json $base
-RUN npm install
-
-COPY . $base
+ADD . $base
+RUN npm install --production
 
 EXPOSE $app_port
 CMD ["npm", "start"]
