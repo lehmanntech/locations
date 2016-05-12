@@ -1,3 +1,6 @@
+/build.sh
+/run-server.sh
+
 .git/
 *.swo
 *.swp
