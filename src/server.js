@@ -1,3 +1,4 @@
+const jwt = require('jwt-simple');
 const db = require('mongoose');
 const bodyParser = require('body-parser');
 const cors = require('cors');
@@ -23,6 +24,17 @@ const Pokemon = db.model('Pokemon', {
   imageUrl: {type: String, required: true}
 });
 
+const Score = db.model('Score', {
+  username: {type: String, required: true},
+  pokemonId: {type: String, required: true}
+})
+
+const jwtSecret = process.env.jwt_secret;
+
+if (!jwtSecret) {
+  throw new Error('No jwt_secret was provided.');
+}
+
 const adminToken = process.env.admin_token;
 
 const port = process.env.app_port || 8081;
@@ -43,7 +55,7 @@ app.post('/locations', (req, res) => {
     return res.status(401).send('Only admins can add new locations!');
   }
 
-  const location = req.body; 
+  const location = req.body;
 
   if (!location || !location.name || !location.lat || !location.lng) {
     return res.status(400).send('Location must be {name, lat, lng}; was ' + JSON.stringify(location));
@@ -55,21 +67,48 @@ app.post('/locations', (req, res) => {
 });
 
 // pokemon
-app.get('/locations/:id', (req, res) => {
-  Pokemon.findOne({id: req.params.id})
-    .then(pokemon => {
-      if (!pokemon) {
-        return res.status(420).send('Wrong ID!');
-      }
+app.get('/pokemon/:id', (req, res) => {
+  const token = req.header('X-Token');
 
-      res.send(pokemon)
-    })
-    .catch(err => res.status(500).send(err));;
+  if (!token) {
+    return res.status(401).send('You must send a token as the HTTP header "X-Token"!');
+  }
+
+  try {
+    const username = jwt.decode(token, jwtSecret);
+
+    Pokemon.findOne({id: req.params.id})
+      .then(pokemon => {
+        if (!pokemon) {
+          return res.status(420).send('Wrong ID!');
+        }
+
+        Score.findOne({username, pokemonId: pokemon.id})
+          .then(score => {
+            // only add to score if the user doesn't already have the Pokémon
+            if (!score) {
+                new Score({
+                  username,
+                  pokemonId: pokemon.id
+                }).save();
+
+                // Distinguish by returning 201 if a score is saved.
+                res.status(201);
+            }
+
+            res.send(pokemon);
+        })
+        .catch(err => res.status(500).send(err));
+      })
+      .catch(err => res.status(500).send(err));
+  } catch (err) {
+    return res.status(401).send('Invalid token! Was: ' + token);
+  }
 });
 
 app.post('/pokemon', (req, res) => {
   const token = req.header('X-Token');
-  
+
   if (token !== adminToken) {
     return res.status(401).send('Only admins can add new Pokémon!');
   }
@@ -82,6 +121,38 @@ app.post('/pokemon', (req, res) => {
 
   new Pokemon(pokemon).save()
     .then(saved => res.status(201).send(saved))
+    .catch(err => res.status(500).send(err));
+});
+
+app.get('/scores', (req, res) => {
+  Score.find()
+    .then(scores => {
+      const scoresByUsername = scores.reduce(
+        (byUsername, score) => {
+          console.log(score);
+          if (!byUsername[score.username]) {
+            byUsername[score.username] = [];
+          }
+
+          byUsername[score.username].push(score.pokemonId);
+          return byUsername;
+        }, {});
+
+      res.send(Object.keys(scoresByUsername).map(username => ({
+        username,
+        score: scoresByUsername[username].length
+      })));
+    })
+    .catch(err => res.status(500).send(err));
+});
+
+app.get('/scores/:username', (req, res) => {
+  const username = req.params.username;
+  Score.find({username})
+    .then(pokemonIds => {
+       const score = pokemonIds.length;
+       return res.send(score);
+    })
     .catch(err => res.status(500).send(err));
 });
 
